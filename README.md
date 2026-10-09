@@ -50,3 +50,7 @@ To avoid duplicates, take a widget off your main bar when you move it here (for 
 ## License
 
 MIT
+
+## Transparency
+
+Extra bars follow the main bar's transparency setting (`bar.transparent` in `shell.json`, toggled from Omarchy's Style > Menu Bar > Transparency), so every edge is either transparent or opaque together.

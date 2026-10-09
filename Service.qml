@@ -62,6 +62,20 @@ Item {
     bars = next
   }
 
+  // Follow the main bar's transparency so every edge matches
+  // (Style > Menu Bar > Transparency toggles `bar.transparent` in shell.json).
+  property bool transparent: false
+  FileView {
+    id: shellCfg
+    path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try { root.transparent = JSON.parse(shellCfg.text()).bar.transparent === true } catch (e) {}
+    }
+    onFileChanged: shellCfg.reload()
+  }
+
   FileView {
     id: cfg
     path: root.configPath
@@ -129,7 +143,7 @@ Item {
     implicitWidth: vert ? size : 0
     implicitHeight: vert ? 0 : size
     exclusionMode: ExclusionMode.Auto
-    color: Color.bar.background
+    color: svc && svc.transparent ? "transparent" : Color.bar.background
     surfaceFormat.opaque: false
     WlrLayershell.namespace: "omarchy-extra-bar"
     WlrLayershell.layer: WlrLayer.Top
