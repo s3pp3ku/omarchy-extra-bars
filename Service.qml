@@ -215,15 +215,113 @@ Item {
 
     Repeater {
       model: section.ids
-      delegate: Hosted {
+      delegate: Loader {
+        id: slot
         required property var modelData
-        entry: modelData
-        barWin: section.barWin
-        svc: section.svc
+        readonly property bool isTray: !!modelData && typeof modelData === "object"
+          && String(modelData.id || "").indexOf("tray:") === 0
+        sourceComponent: isTray ? trayGroup : hostedWidget
+        Component { id: hostedWidget; Hosted { entry: slot.modelData; barWin: section.barWin; svc: section.svc } }
+        Component { id: trayGroup; TrayGroup { entry: slot.modelData; barWin: section.barWin; svc: section.svc } }
       }
     }
   }
 
+  // A drawer holding its own list of widgets: a chevron that slides them out.
+  // Any number can sit on any bar; each is {"id": "tray:<name>", "widgets": [ids]}.
+  // It opens toward the middle of the bar (right/down from the start half,
+  // left/up from the end half) and the chevron points the way it will open.
+  component TrayGroup: Item {
+    id: tg
+    property var barWin: null
+    property var svc: null
+    property var entry: null
+    readonly property var members: entry && entry.widgets && entry.widgets.length !== undefined ? entry.widgets : []
+    readonly property bool vert: !!barWin && barWin.vert
+    readonly property real thick: barWin ? barWin.size : 30
+    readonly property real chevSize: Style.bar.iconSlot
+    property bool pinned: false
+    property bool held: false
+    property bool reverse: false
+    readonly property bool open: pinned || held
+    property real reveal: open ? 1 : 0
+    Behavior on reveal { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+    readonly property real innerExtent: vert ? inner.implicitHeight : inner.implicitWidth
+    readonly property real shown: innerExtent * reveal
+    implicitWidth: vert ? thick : chevSize + shown
+    implicitHeight: vert ? chevSize + shown : thick
+
+    // Which way it opens; measured only while closed so opening can't flip it.
+    function measure() {
+      if (reveal > 0.001 || !barWin || !barWin.contentItem) return
+      var p = chev.mapToItem(barWin.contentItem, chev.width / 2, chev.height / 2)
+      var pos = vert ? p.y : p.x
+      var len = vert ? barWin.contentItem.height : barWin.contentItem.width
+      if (len > 0) reverse = pos > len / 2
+    }
+    Timer { interval: 400; running: true; repeat: true; triggeredOnStart: true; onTriggered: tg.measure() }
+
+    // Keep it open a moment after the pointer leaves, so moving onto a popup doesn't snap it shut.
+    Timer { id: closeDelay; interval: 700; onTriggered: tg.held = false }
+    HoverHandler {
+      id: hover
+      onHoveredChanged: { if (hovered) { closeDelay.stop(); tg.held = true } else closeDelay.restart() }
+    }
+
+    Item {
+      id: chev
+      width: tg.vert ? tg.thick : tg.chevSize
+      height: tg.vert ? tg.chevSize : tg.thick
+      x: tg.vert ? 0 : (tg.reverse ? tg.shown : 0)
+      y: tg.vert ? (tg.reverse ? tg.shown : 0) : 0
+      Text {
+        anchors.centerIn: parent
+        color: tg.open ? Color.accent : Color.foreground
+        font.family: Style.font.family
+        font.pixelSize: 14
+        // points the way it opens; flips to point back while it is open
+        text: {
+          var towardEnd = !tg.reverse
+          if (tg.open) towardEnd = !towardEnd
+          if (tg.vert) return towardEnd ? "\uf078" : "\uf077"
+          return towardEnd ? "\uf054" : "\uf053"
+        }
+      }
+      MouseArea {
+        anchors.fill: parent
+        onClicked: tg.pinned = !tg.pinned
+      }
+    }
+
+    Item {
+      id: clip
+      clip: true
+      width: tg.vert ? tg.thick : tg.shown
+      height: tg.vert ? tg.shown : tg.thick
+      x: tg.vert ? 0 : (tg.reverse ? 0 : tg.chevSize)
+      y: tg.vert ? (tg.reverse ? 0 : tg.chevSize) : 0
+      Grid {
+        id: inner
+        // pinned to the edge next to the chevron, so contents slide out from it
+        x: tg.vert ? 0 : (tg.reverse ? clip.width - width : 0)
+        y: tg.vert ? (tg.reverse ? clip.height - height : 0) : 0
+        flow: tg.vert ? Grid.TopToBottom : Grid.LeftToRight
+        columns: tg.vert ? 1 : Math.max(1, tg.members.length)
+        rows: tg.vert ? Math.max(1, tg.members.length) : 1
+        spacing: Style.space(2)
+        Repeater {
+          model: tg.members
+          delegate: Hosted {
+            required property var modelData
+            entry: modelData
+            barWin: tg.barWin
+            svc: tg.svc
+          }
+        }
+      }
+    }
+  }
 
   // One widget plus the bar facade it expects from its host.
   component Hosted: Item {
@@ -245,7 +343,9 @@ Item {
       barWin.kbHolders = m
     }
 
-    readonly property bool needsService: !!info && info.service !== ""
+    readonly property var realService: svc && svc.shell && typeof svc.shell.serviceFor === "function"
+      ? svc.shell.serviceFor(widgetId) : null
+    readonly property bool needsService: !!info && info.service !== "" && !realService
 
     function targetClickable(t) {
       return t && t.visible !== false && t.opacity !== 0 && t.interactive !== false
@@ -300,7 +400,13 @@ Item {
 
     QtObject {
       id: hostShell
-      function serviceFor(id) { return String(id) === host.widgetId && svcLoader.item ? svcLoader.item : null }
+      // The real shell's service wins when it is running (so a widget shares state with the rest of
+      // Omarchy and nothing runs twice); otherwise the widget gets its own copy from svcLoader.
+      function serviceFor(id) {
+        if (String(id) !== host.widgetId) return null
+        return host.realService || (svcLoader.item ? svcLoader.item : null)
+      }
+      function firstPartyServiceFor(id) { return serviceFor(id) }
     }
 
     Loader {

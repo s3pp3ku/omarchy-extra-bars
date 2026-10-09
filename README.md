@@ -54,3 +54,15 @@ MIT
 ## Transparency
 
 Extra bars follow the main bar's transparency setting (`bar.transparent` in `shell.json`, toggled from Omarchy's Style > Menu Bar > Transparency), so every edge is either transparent or opaque together.
+
+## Trays
+
+Any bar can hold any number of **trays**: a chevron that slides a group of widgets out of it. Each tray keeps its own list:
+
+```json
+{ "id": "tray:t1", "widgets": ["com.leafbox.f1", "s3pp3ku.mlb"] }
+```
+
+Put the entry in a bar section next to the plain widget ids. A tray opens toward the middle of its bar (right or down from the start half, left or up from the end half), and its chevron points the way it will open, so dragging or moving it to the other side flips both. Click the chevron to keep it open; hovering also opens it. An empty tray shows just its chevron.
+
+[Bar Manager](https://github.com/s3pp3ku/omarchy-bar-manager) can add, move and remove trays and put widgets into them (`barctl addtray`, `intray`, `rmtray`, or the `+ Tray` button and the tray column in its panel).
