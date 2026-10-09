@@ -29,13 +29,17 @@ Then create `~/.config/omarchy/extra-bars.json`:
 - `left` / `center` / `right`: widget ids, or objects with an `id` plus per-widget settings. Find ids with `omarchy plugin list`.
 - The file is watched, so edits apply without a restart. Side bars lay widgets out vertically.
 
-To avoid duplicates, take a widget off your main bar when you move it here (for example with [Bar Manager](https://github.com/s3pp3ku/omarchy-bar-manager)'s Hide).
+To avoid duplicates, take a widget off your main bar when you move it here (for example by editing `~/.config/omarchy/shell.json`).
 
 ## What works
 
 - Popups flip away from the bar, and widgets that register click targets (like the system info widget) get their clicks.
 - Widgets that read data from a companion service (for example Omaudix) get their own copy of it.
 - Widgets with a text input can take the keyboard: the bar uses On-Demand keyboard focus plus a Hyprland focus grab, so clicking anywhere else gives the keyboard back.
+
+## Pairs well with
+
+[BarTerm](https://github.com/s3pp3ku/omarchy-barterm): a command prompt widget for the bar, with an output popup that opens above a bottom bar.
 
 ## Limits
 
