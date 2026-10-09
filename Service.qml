@@ -308,8 +308,12 @@ Item {
       active: host.needsService
       source: host.needsService ? "file://" + host.info.service : ""
       onLoaded: {
-        item.manifest = { id: host.widgetId, __sourceDir: host.info.dir }
-        item.shell = hostShell
+        if ("manifest" in item) item.manifest = { id: host.widgetId, __sourceDir: host.info.dir }
+        if ("shell" in item) item.shell = hostShell
+        // Services that host other bar widgets (the Tray's drawer) need the shell's widget registry.
+        var real = host.svc ? host.svc.shell : null
+        if ("barWidgetRegistry" in item && real && typeof real.pluginBarWidgetRegistryFor === "function")
+          item.barWidgetRegistry = real.pluginBarWidgetRegistryFor({ id: host.widgetId, __sourceDir: host.info.dir })
       }
     }
 
