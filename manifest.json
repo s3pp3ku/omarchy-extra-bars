@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "s3pp3ku.extra-bars",
+  "name": "Extra Bars",
+  "version": "0.1.0",
+  "author": "s3pp3ku",
+  "license": "MIT",
+  "description": "Extra bars on the bottom, left or right edge that host your existing bar widgets. Configured in ~/.config/omarchy/extra-bars.json.",
+  "kinds": ["service"],
+  "keepLoaded": true,
+  "entryPoints": { "service": "Service.qml" }
+}
