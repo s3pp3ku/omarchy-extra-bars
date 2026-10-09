@@ -66,3 +66,18 @@ Any bar can hold any number of **trays**: a chevron that slides a group of widge
 Put the entry in a bar section next to the plain widget ids. A tray opens toward the middle of its bar (right or down from the start half, left or up from the end half), and its chevron points the way it will open, so dragging or moving it to the other side flips both. Click the chevron to keep it open; hovering also opens it. An empty tray shows just its chevron.
 
 [Bar Manager](https://github.com/s3pp3ku/omarchy-bar-manager) can add, move and remove trays and put widgets into them (`barctl addtray`, `intray`, `rmtray`, or the `+ Tray` button and the tray column in its panel).
+
+## Drag and drop
+
+Press and drag any widget on an extra bar to move it. A marker shows where it will land and a label follows the pointer.
+
+- **Between sections and bars**: drop it on any section of any extra bar, before the widget under the pointer, or at the end of a section. Dropping on an empty section puts it there.
+- **Onto the main bar**: drop it on the main bar and it goes to the end of the section under the pointer (left, center or right third).
+- **Side bars** read top to bottom: the three sections are top, middle and bottom.
+- A widget can opt out of dragging with `readonly property bool draggable: false` (BarTerm does, because dragging in its input would fight with selecting text).
+- Moves are applied with [Bar Manager](https://github.com/s3pp3ku/omarchy-bar-manager)'s `barctl drop`, so Bar Manager must be installed for drag and drop to work. The widget's own click now fires on release rather than on press, so a click and a drag can be told apart.
+- Widgets on the *main* bar cannot be dragged onto an extra bar: Omarchy's main bar handles its own drags and does not share them with plugins. Move those with Bar Manager's pickers.
+
+## Corners
+
+Top and bottom bars take priority: they are created first, so side bars run between them and shrink to fit instead of overlapping the corners.

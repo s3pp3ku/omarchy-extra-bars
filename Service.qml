@@ -24,13 +24,21 @@ Item {
 
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/extra-bars.json"
   property var bars: []
+  // Bumped whenever a bar is added or removed, so every bar window is rebuilt in the right order
+  // (the compositor gives screen edges to windows in creation order).
+  property int surfaceGen: 0
+  property string lastSignature: ""
   property var catalog: ({})   // widget id -> { path, defaults }
 
+  // Top and bottom bars are created first: the compositor hands out screen edges in
+  // creation order, so the side bars end up between them instead of overlapping the corners.
   readonly property var surfaces: {
     var out = []
-    for (var b = 0; b < bars.length; b++)
+    var order = ["top", "bottom", "left", "right"]
+    var sorted = bars.slice().sort(function(a, b) { return order.indexOf(a.position) - order.indexOf(b.position) })
+    for (var b = 0; b < sorted.length; b++)
       for (var s = 0; s < Quickshell.screens.length; s++)
-        out.push({ cfg: bars[b], screen: Quickshell.screens[s] })
+        out.push({ cfg: sorted[b], screen: Quickshell.screens[s], gen: surfaceGen })
     return out
   }
 
@@ -58,6 +66,13 @@ Item {
       }
     } catch (e) {
       console.warn("extra-bars: could not read " + configPath + ": " + e)
+    }
+    var sig = next.map(function(b) { return b.position }).sort().join(",")
+    if (sig !== lastSignature) {
+      var first = lastSignature === ""
+      lastSignature = sig
+      surfaceGen++
+      if (!first) { surfacesOn = false; rebuild.restart() }   // adding/removing a bar: rebuild all, top and bottom first
     }
     bars = next
   }
@@ -101,7 +116,8 @@ Item {
             if (!p.barWidgetPath) continue
             var svc = (Array.isArray(p.kinds) && p.kinds.indexOf("service") !== -1 && p.entryPoints && p.entryPoints.service)
               ? p.sourceDir + "/" + p.entryPoints.service : ""
-            map[p.id] = { path: String(p.barWidgetPath),
+            map[p.id] = { name: String(p.name || p.id),
+                          path: String(p.barWidgetPath),
                           dir: String(p.sourceDir || ""),
                           service: svc,
                           defaults: (p.barWidget && p.barWidget.defaults) || {} }
@@ -112,14 +128,179 @@ Item {
     }
   }
 
+  // ------------------------------------------------------------ drag and drop
+  // Press and drag a widget to move it: onto any section of any extra bar (before the
+  // widget under the pointer), or onto a section of the main bar. The move is applied by
+  // Bar Manager's `barctl drop`, so the config files stay the single source of truth.
+  property var dragSource: null          // { id, name }
+  property bool dragLive: false
+  property real dragGX: 0
+  property real dragGY: 0
+  property var dropTarget: null          // { edge, section, before, rect: {x, y, w, h} } in screen coordinates
+  property var layerRects: ({})          // layer-shell namespace -> { x, y, w, h }
+  property var barItems: ({})            // edge -> ExtraBar
+  property var lastScene: null           // { win, x, y } until the layer geometry has loaded
+  readonly property string barctlPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/s3pp3ku.bar-manager/bin/barctl"
+
+  function parseLayers(text) {
+    var rects = {}
+    try {
+      var data = JSON.parse(text)
+      for (var mon in data) {
+        var levels = data[mon].levels || {}
+        for (var lv in levels) {
+          var arr = levels[lv]
+          for (var i = 0; i < arr.length; i++) {
+            var l = arr[i]
+            if (String(l.namespace).indexOf("omarchy-bar") === 0 || String(l.namespace).indexOf("omarchy-extra-bar-") === 0)
+              rects[l.namespace] = { x: l.x, y: l.y, w: l.w, h: l.h }
+          }
+        }
+      }
+    } catch (e) { console.warn("extra-bars: could not read layer geometry: " + e) }
+    layerRects = rects
+    if (lastScene && dragLive) updateDrag(lastScene.win, lastScene.x, lastScene.y)
+  }
+
+  function beginDrag(host) {
+    var info = catalog[host.widgetId]
+    dragSource = { id: host.widgetId, name: info && info.name ? info.name : host.widgetId }
+    dropTarget = null
+    lastScene = null
+    dragLive = true
+    layersProc.running = false
+    layersProc.running = true
+  }
+
+  function updateDrag(win, sceneX, sceneY) {
+    if (!dragLive) return
+    lastScene = { win: win, x: sceneX, y: sceneY }
+    var r = layerRects["omarchy-extra-bar-" + win.pos]
+    if (!r) return                                   // geometry still loading
+    dragGX = r.x + sceneX
+    dragGY = r.y + sceneY
+    dropTarget = findTarget(dragGX, dragGY)
+  }
+
+  function inRect(r, x, y, slack) {
+    return x >= r.x - slack && x <= r.x + r.w + slack && y >= r.y - slack && y <= r.y + r.h + slack
+  }
+
+  function findTarget(gx, gy) {
+    var edges = ["top", "bottom", "left", "right"]
+    for (var i = 0; i < edges.length; i++) {
+      var r = layerRects["omarchy-extra-bar-" + edges[i]]
+      var win = barItems[edges[i]]
+      if (!r || !win || !inRect(r, gx, gy, 12)) continue
+      var d = win.dropAt(gx - r.x, gy - r.y, dragSource ? dragSource.id : "")
+      if (d) return { edge: edges[i], section: d.section, before: d.before,
+                      rect: { x: r.x + d.ind.x, y: r.y + d.ind.y, w: d.ind.w, h: d.ind.h } }
+    }
+    var m = layerRects["omarchy-bar"]
+    if (m && inRect(m, gx, gy, 12)) {
+      var edge = shell && shell.bar ? shell.bar.position : "top"
+      var vertical = edge === "left" || edge === "right"
+      var a = vertical ? gy - m.y : gx - m.x
+      var len = vertical ? m.h : m.w
+      var third = Math.max(0, Math.min(2, Math.floor(a / (len / 3))))
+      var names = ["left", "center", "right"]
+      return { edge: edge, section: names[third], before: "",
+               rect: vertical ? { x: m.x, y: m.y + third * len / 3, w: m.w, h: len / 3 }
+                              : { x: m.x + third * len / 3, y: m.y, w: len / 3, h: m.h } }
+    }
+    return null
+  }
+
+  function endDrag() {
+    var tgt = dropTarget, src = dragSource
+    dragLive = false
+    dragSource = null
+    dropTarget = null
+    lastScene = null
+    if (!tgt || !src) return
+    dropProc.command = [barctlPath, "drop", src.id, tgt.edge, tgt.section, tgt.before]
+    dropProc.running = false
+    dropProc.running = true
+  }
+
+  Process {
+    id: layersProc
+    command: ["hyprctl", "layers", "-j"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.parseLayers(text) }
+  }
+  Process {
+    id: dropProc
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim()) console.warn("extra-bars: move failed: " + text.trim())
+    }
+  }
+
+  // The ghost label and drop marker, drawn above everything. Click-through (empty input mask).
   Variants {
-    model: root.surfaces
+    model: Quickshell.screens
     delegate: Component {
-      ExtraBar {
+      PanelWindow {
         required property var modelData
-        svc: root
-        screen: modelData.screen
-        config: modelData.cfg
+        screen: modelData
+        visible: root.dragLive
+        anchors { top: true; bottom: true; left: true; right: true }
+        exclusionMode: ExclusionMode.Ignore
+        color: "transparent"
+        mask: Region {}
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "omarchy-extra-bar-drag"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+        Rectangle {
+          visible: root.dropTarget !== null
+          x: root.dropTarget ? root.dropTarget.rect.x : 0
+          y: root.dropTarget ? root.dropTarget.rect.y : 0
+          width: root.dropTarget ? root.dropTarget.rect.w : 0
+          height: root.dropTarget ? root.dropTarget.rect.h : 0
+          color: Color.accent
+          opacity: root.dropTarget && root.dropTarget.rect.w > 12 && root.dropTarget.rect.h > 12 ? 0.25 : 0.95
+          radius: 2
+        }
+        Rectangle {
+          visible: root.dropTarget !== null
+          x: root.dragGX + 14
+          y: root.dragGY + 14
+          width: ghostLabel.implicitWidth + 16
+          height: ghostLabel.implicitHeight + 8
+          color: Color.bar.background
+          border.color: Color.accent
+          border.width: 1
+          radius: 4
+          Text {
+            id: ghostLabel
+            anchors.centerIn: parent
+            text: root.dragSource ? root.dragSource.name : ""
+            color: Color.foreground
+            font.family: Style.font.family
+            font.pixelSize: 12
+          }
+        }
+      }
+    }
+  }
+
+  // All bar windows live under this Loader so they can be torn down and rebuilt together.
+  property bool surfacesOn: true
+  Timer { id: rebuild; interval: 120; onTriggered: root.surfacesOn = true }
+  Loader {
+    active: root.surfacesOn
+    sourceComponent: Component {
+      Variants {
+        model: root.surfaces
+        delegate: Component {
+          ExtraBar {
+            required property var modelData
+            svc: root
+            screen: modelData.screen
+            config: modelData.cfg
+          }
+        }
       }
     }
   }
@@ -145,7 +326,7 @@ Item {
     exclusionMode: ExclusionMode.Auto
     color: svc && svc.transparent ? "transparent" : Color.bar.background
     surfaceFormat.opaque: false
-    WlrLayershell.namespace: "omarchy-extra-bar"
+    WlrLayershell.namespace: "omarchy-extra-bar-" + win.pos
     WlrLayershell.layer: WlrLayer.Top
 
     // Widgets with a text input (wantsKeyboard) get the keyboard only while
@@ -156,6 +337,43 @@ Item {
     property var kbHolders: ({})   // widget id -> widget item
     readonly property bool kbWanted: Object.keys(kbHolders).length > 0
     WlrLayershell.keyboardFocus: kbWanted ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+    Component.onCompleted: if (svc) svc.barItems[pos] = win
+
+    // Where a widget dropped at (lx, ly) in this bar would land: the section, the widget it goes
+    // before, and a marker rectangle (all in this window's coordinates).
+    function dropAt(lx, ly, excludeId) {
+      var secs = [{ name: "left", item: secL }, { name: "center", item: secC }, { name: "right", item: secR }]
+      var a = vert ? ly : lx
+      var len = vert ? height : width
+      var chosen = null
+      for (var i = 0; i < 3 && !chosen; i++) {
+        var it = secs[i].item
+        var size = vert ? it.height : it.width
+        if (size <= 0) continue
+        var p = it.mapToItem(win.contentItem, 0, 0)
+        var start = vert ? p.y : p.x
+        if (a >= start - 10 && a <= start + size + 10) chosen = secs[i]
+      }
+      if (!chosen) chosen = a < len / 3 ? secs[0] : (a < 2 * len / 3 ? secs[1] : secs[2])
+      var slots = chosen.item.slotRects(excludeId)
+      var origin = chosen.item.mapToItem(win.contentItem, 0, 0)
+      var ox = vert ? origin.y : origin.x
+      var before = "", mark = 0, found = false
+      for (var j = 0; j < slots.length; j++) {
+        var s = slots[j]
+        var centre = ox + (vert ? s.y + s.h / 2 : s.x + s.w / 2)
+        if (a < centre) { before = s.id; mark = ox + (vert ? s.y : s.x); found = true; break }
+      }
+      if (!found) {
+        if (slots.length) {
+          var last = slots[slots.length - 1]
+          mark = ox + (vert ? last.y + last.h : last.x + last.w)
+        } else mark = chosen.name === "left" ? 10 : (chosen.name === "center" ? len / 2 : len - 10)
+      }
+      return { section: chosen.name, before: before,
+               ind: vert ? { x: 3, y: mark - 1.5, w: width - 6, h: 3 } : { x: mark - 1.5, y: 3, w: 3, h: height - 6 } }
+    }
 
     function releaseKeyboards() {
       var held = kbHolders
@@ -173,6 +391,7 @@ Item {
     }
 
     Section {
+      id: secL
       barWin: win
       svc: win.svc
       ids: win.config.left
@@ -184,12 +403,14 @@ Item {
       anchors.horizontalCenter: win.vert ? parent.horizontalCenter : undefined
     }
     Section {
+      id: secC
       barWin: win
       svc: win.svc
       ids: win.config.center
       anchors.centerIn: parent
     }
     Section {
+      id: secR
       barWin: win
       svc: win.svc
       ids: win.config.right
@@ -213,7 +434,21 @@ Item {
     rows: barWin.vert ? Math.max(1, ids.length) : 1
     spacing: Style.space(2)
 
+    function slotRects(excludeId) {
+      var out = []
+      for (var i = 0; i < slotRepeater.count; i++) {
+        var it = slotRepeater.itemAt(i)
+        if (!it || it.width <= 0 || it.height <= 0) continue
+        var id = section.svc.entryId(it.modelData)
+        if (id === excludeId) continue
+        var p = it.mapToItem(section, 0, 0)
+        out.push({ id: id, x: p.x, y: p.y, w: it.width, h: it.height })
+      }
+      return out
+    }
+
     Repeater {
+      id: slotRepeater
       model: section.ids
       delegate: Loader {
         id: slot
@@ -345,6 +580,20 @@ Item {
 
     readonly property var realService: svc && svc.shell && typeof svc.shell.serviceFor === "function"
       ? svc.shell.serviceFor(widgetId) : null
+    // A widget can opt out of being dragged (e.g. one with a text field) with `readonly property bool draggable: false`.
+    readonly property bool noDrag: !!loader.item && loader.item.draggable === false
+
+    DragHandler {
+      id: dragger
+      enabled: !host.noDrag
+      target: null
+      acceptedButtons: Qt.LeftButton
+      dragThreshold: 10
+      grabPermissions: PointerHandler.CanTakeOverFromItems | PointerHandler.CanTakeOverFromHandlersOfDifferentType | PointerHandler.ApprovesTakeOverByAnything
+      onActiveChanged: { if (active) host.svc.beginDrag(host); else host.svc.endDrag() }
+      onCentroidChanged: if (active) host.svc.updateDrag(host.barWin, centroid.scenePosition.x, centroid.scenePosition.y)
+    }
+
     readonly property bool needsService: !!info && info.service !== "" && !realService
 
     function targetClickable(t) {
@@ -446,11 +695,20 @@ Item {
       anchors.fill: parent
       z: 1000
       acceptedButtons: Qt.AllButtons
+      // Clicks fire on release so that a press-and-drag (see the DragHandler) can move the widget instead.
+      property var pendingTarget: null
+      property int pendingButton: 0
       onPressed: function (m) {
         var t = host.clickTargetAt(m.x, m.y)
-        if (t) { t.triggerPress(m.button); m.accepted = true }
+        if (t) { pendingTarget = t; pendingButton = m.button; m.accepted = true }
         else m.accepted = false
       }
+      onReleased: function (m) {
+        var t = pendingTarget
+        pendingTarget = null
+        if (t) t.triggerPress(pendingButton)
+      }
+      onCanceled: pendingTarget = null
     }
   }
 }
