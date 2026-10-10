@@ -160,6 +160,29 @@ Item {
     } catch (e) { console.warn("extra-bars: could not read layer geometry: " + e) }
     layerRects = rects
     if (lastScene && dragLive) updateDrag(lastScene.win, lastScene.x, lastScene.y)
+    if (pendingMainDrop) {
+      var p = pendingMainDrop
+      pendingMainDrop = null
+      applyMainDrop(p)
+    }
+  }
+
+  // A widget dragged off the main bar and released outside it (the bar tells us through IPC).
+  property var pendingMainDrop: null
+  function applyMainDrop(p) {
+    var t = findTarget(p.x, p.y)
+    if (!t || t.edge === (shell && shell.bar ? shell.bar.position : "top")) return   // not over an extra bar
+    dropProc.command = [barctlPath, "drop", p.id, t.edge, t.section, t.before]
+    dropProc.running = false
+    dropProc.running = true
+  }
+  IpcHandler {
+    target: "s3pp3ku.extra-bars"
+    function dropFromMain(id: string, x: string, y: string): void {
+      root.pendingMainDrop = { id: id, x: Number(x), y: Number(y) }
+      layersProc.running = false
+      layersProc.running = true
+    }
   }
 
   function beginDrag(host) {
@@ -187,17 +210,22 @@ Item {
   }
 
   function findTarget(gx, gy) {
+    // exact hits first; the 12px slack only if nothing is hit exactly (so corners go to the bar really under the pointer)
+    return findTargetWithSlack(gx, gy, 0) || findTargetWithSlack(gx, gy, 12)
+  }
+
+  function findTargetWithSlack(gx, gy, slack) {
     var edges = ["top", "bottom", "left", "right"]
     for (var i = 0; i < edges.length; i++) {
       var r = layerRects["omarchy-extra-bar-" + edges[i]]
       var win = barItems[edges[i]]
-      if (!r || !win || !inRect(r, gx, gy, 12)) continue
+      if (!r || !win || !inRect(r, gx, gy, slack)) continue
       var d = win.dropAt(gx - r.x, gy - r.y, dragSource ? dragSource.id : "")
       if (d) return { edge: edges[i], section: d.section, before: d.before,
                       rect: { x: r.x + d.ind.x, y: r.y + d.ind.y, w: d.ind.w, h: d.ind.h } }
     }
     var m = layerRects["omarchy-bar"]
-    if (m && inRect(m, gx, gy, 12)) {
+    if (m && inRect(m, gx, gy, slack)) {
       var edge = shell && shell.bar ? shell.bar.position : "top"
       var vertical = edge === "left" || edge === "right"
       var a = vertical ? gy - m.y : gx - m.x

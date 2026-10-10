@@ -76,7 +76,7 @@ Press and drag any widget on an extra bar to move it. A marker shows where it wi
 - **Side bars** read top to bottom: the three sections are top, middle and bottom.
 - A widget can opt out of dragging with `readonly property bool draggable: false` (BarTerm does, because dragging in its input would fight with selecting text).
 - Moves are applied with [Bar Manager](https://github.com/s3pp3ku/omarchy-bar-manager)'s `barctl drop`, so Bar Manager must be installed for drag and drop to work. The widget's own click now fires on release rather than on press, so a click and a drag can be told apart.
-- Widgets on the *main* bar cannot be dragged onto an extra bar: Omarchy's main bar handles its own drags and does not share them with plugins. Move those with Bar Manager's pickers.
+- Dragging a widget from the *main* bar onto an extra bar needs a one-hook copy of Omarchy's bar: Omarchy's own bar does not tell plugins about drags. Run `omarchy plugin clone omarchy.bar`, then in the copy's `Bar.qml`, in the module `MouseArea`'s `onReleased`, add an `else if (wasDragging)` branch (after the `wasDragging && targetSlot` one) that runs `Quickshell.execDetached(["omarchy-shell", "s3pp3ku.extra-bars", "dropFromMain", String(slot.moduleName), String(Math.round(root.barDragScreenX)), String(Math.round(root.barDragScreenY))])` (read the two coordinates before `root.clearBarDrag()`). Extra Bars answers that call and moves the widget. Without the copy, move main-bar widgets with Bar Manager's pickers. `omarchy bar reset` goes back to the stock bar.
 
 ## Corners
 
