@@ -32,15 +32,18 @@ Item {
 
   // Top and bottom bars are created first: the compositor hands out screen edges in
   // creation order, so the side bars end up between them instead of overlapping the corners.
-  readonly property var surfaces: {
+  function surfacesFor(sides) {
     var out = []
-    var order = ["top", "bottom", "left", "right"]
-    var sorted = bars.slice().sort(function(a, b) { return order.indexOf(a.position) - order.indexOf(b.position) })
-    for (var b = 0; b < sorted.length; b++)
+    for (var b = 0; b < bars.length; b++) {
+      var isSide = bars[b].position === "left" || bars[b].position === "right"
+      if (isSide !== sides) continue
       for (var s = 0; s < Quickshell.screens.length; s++)
-        out.push({ cfg: sorted[b], screen: Quickshell.screens[s], gen: surfaceGen })
+        out.push({ cfg: bars[b], screen: Quickshell.screens[s], gen: surfaceGen })
+    }
     return out
   }
+  readonly property var flatSurfaces: surfacesFor(false)
+  readonly property var sideSurfaces: surfacesFor(true)
 
   function entryId(e) { return typeof e === "string" ? e : (e && e.id ? String(e.id) : "") }
   function entrySettings(e) {
@@ -187,7 +190,7 @@ Item {
 
   function beginDrag(host) {
     var info = catalog[host.widgetId]
-    dragSource = { id: host.widgetId, name: info && info.name ? info.name : host.widgetId }
+    dragSource = { id: host.widgetId, name: host.dragLabel ? host.dragLabel : (info && info.name ? info.name : host.widgetId) }
     dropTarget = null
     lastScene = null
     dragLive = true
@@ -246,6 +249,7 @@ Item {
     dropTarget = null
     lastScene = null
     if (!tgt || !src) return
+    if (src.id.indexOf("tray:") === 0 && tgt.edge === (shell && shell.bar ? shell.bar.position : "top")) return   // the main bar uses the Tray plugin
     dropProc.command = [barctlPath, "drop", src.id, tgt.edge, tgt.section, tgt.before]
     dropProc.running = false
     dropProc.running = true
@@ -313,14 +317,34 @@ Item {
     }
   }
 
-  // All bar windows live under this Loader so they can be torn down and rebuilt together.
+  // Top and bottom bars are created first and the side bars a moment later, because the compositor
+  // gives screen edges to windows in the order they appear: side bars then run between the others.
   property bool surfacesOn: true
-  Timer { id: rebuild; interval: 120; onTriggered: root.surfacesOn = true }
+  property bool sidesOn: false
+  Timer { id: rebuild; interval: 150; onTriggered: root.surfacesOn = true }
+  Timer { id: sidesDelay; interval: 450; running: root.surfacesOn && !root.sidesOn; onTriggered: root.sidesOn = true }
+  onSurfacesOnChanged: if (!surfacesOn) sidesOn = false
   Loader {
     active: root.surfacesOn
     sourceComponent: Component {
       Variants {
-        model: root.surfaces
+        model: root.flatSurfaces
+        delegate: Component {
+          ExtraBar {
+            required property var modelData
+            svc: root
+            screen: modelData.screen
+            config: modelData.cfg
+          }
+        }
+      }
+    }
+  }
+  Loader {
+    active: root.surfacesOn && root.sidesOn
+    sourceComponent: Component {
+      Variants {
+        model: root.sideSurfaces
         delegate: Component {
           ExtraBar {
             required property var modelData
@@ -546,6 +570,8 @@ Item {
     property var svc: null
     property var entry: null
     readonly property var members: entry && entry.widgets && entry.widgets.length !== undefined ? entry.widgets : []
+    readonly property string widgetId: entry && entry.id ? String(entry.id) : ""
+    readonly property string dragLabel: "Tray " + widgetId.replace("tray:", "") + " (" + members.length + ")"
     readonly property bool vert: !!barWin && barWin.vert
     readonly property real thick: barWin ? barWin.size : 30
     readonly property real chevSize: Style.bar.iconSlot
@@ -600,6 +626,15 @@ Item {
       MouseArea {
         anchors.fill: parent
         onClicked: tg.pinned = !tg.pinned
+      }
+      // Grab the chevron and drag: the whole tray, with everything in it, moves to the drop spot.
+      DragHandler {
+        target: null
+        acceptedButtons: Qt.LeftButton
+        dragThreshold: 10
+        grabPermissions: PointerHandler.CanTakeOverFromItems | PointerHandler.CanTakeOverFromHandlersOfDifferentType | PointerHandler.ApprovesTakeOverByAnything
+        onActiveChanged: { if (active) tg.svc.beginDrag(tg); else tg.svc.endDrag() }
+        onCentroidChanged: if (active) tg.svc.updateDrag(tg.barWin, centroid.scenePosition.x, centroid.scenePosition.y)
       }
     }
 

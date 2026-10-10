@@ -74,13 +74,14 @@ Press and drag any widget on an extra bar to move it. A marker shows where it wi
 - **Between sections and bars**: drop it on any section of any extra bar, before the widget under the pointer, or at the end of a section. Dropping on an empty section puts it there.
 - **Onto the main bar**: drop it on the main bar and it goes to the end of the section under the pointer (left, center or right third).
 - **Side bars** read top to bottom: the three sections are top, middle and bottom.
+- **Whole trays**: grab a tray's chevron and drag: the tray and everything in it moves to the drop spot (trays cannot go on the main bar, which uses the Tray plugin).
 - A widget can opt out of dragging with `readonly property bool draggable: false` (BarTerm does, because dragging in its input would fight with selecting text).
 - Moves are applied with [Bar Manager](https://github.com/s3pp3ku/omarchy-bar-manager)'s `barctl drop`, so Bar Manager must be installed for drag and drop to work. The widget's own click now fires on release rather than on press, so a click and a drag can be told apart.
 - Widgets on the *main* bar cannot be dragged onto an extra bar: Omarchy's own bar does not tell plugins about drags. A copy of the bar can be hooked to do it, but a copied bar loses access to other plugins' services (the Tray's drawer and Keylight stop working), so it is not recommended. Move main-bar widgets with Bar Manager's pickers instead.
 
 ## Corners
 
-Top and bottom bars take priority: they are created first, so side bars run between them and shrink to fit instead of overlapping the corners.
+Top and bottom bars take priority: they are created first and the side bars a moment later (the compositor hands out screen edges in the order windows appear), so side bars run between them and shrink to fit instead of overlapping the corners.
 
 ## Tooltips
 
