@@ -318,6 +318,113 @@ Item {
     }
   }
 
+  // ------------------------------------------------------------ icon probe
+  // Bar Manager's Layout screen wants the icon each widget really draws. We load the widgets for a
+  // moment, read the first icon glyph in each, and write them to ~/.cache/barctl-icons-live.json.
+  function glyphOf(str) {
+    str = String(str || "")
+    for (var i = 0; i < str.length; i++) {
+      var c = str.codePointAt(i)
+      if (c === 0xf053 || c === 0xf054 || c === 0xf077 || c === 0xf078) continue   // chevrons are UI
+      if ((c >= 0xe000 && c <= 0xf8ff) || (c >= 0xf0000 && c <= 0xffffd)) return String.fromCodePoint(c)
+      if (c > 0xffff) i++
+    }
+    return ""
+  }
+  function findGlyph(obj, depth) {
+    if (!obj || depth > 14 || obj.visible === false) return ""
+    if (typeof obj.text === "string" && obj.width > 0) { var g = glyphOf(obj.text); if (g) return g }
+    var kids = obj.children
+    if (kids) for (var i = 0; i < kids.length; i++) { var r = findGlyph(kids[i], depth + 1); if (r) return r }
+    return ""
+  }
+  property bool probeOn: false
+  property var probeIds: []
+  readonly property string cacheDir: Quickshell.env("HOME") + "/.cache/barctl-icons"
+  function startProbe(csv) {
+    var ids = String(csv).split(",").filter(function(id) { return id && catalog[id] })
+    if (!ids.length) return
+    Quickshell.execDetached(["mkdir", "-p", cacheDir])
+    probeIds = ids
+    probeOn = true
+    probeDone.restart()
+  }
+  // a glyph if the widget draws one; otherwise (SVG, canvas, sprite) a picture of the widget as rendered
+  property var probeOut: ({})
+  property int probePending: 0
+  function finishProbe() {
+    probeOut = {}
+    probePending = 0
+    for (var i = 0; i < probeRep.count; i++) {
+      var h = probeRep.itemAt(i)
+      if (!h) continue
+      var g = findGlyph(h.widgetItem, 0)
+      if (g) { probeOut[h.widgetId] = g; continue }
+      if (h.width < 2 || h.height < 2 || !h.widgetItem) continue
+      probePending++
+      ;(function(host) {
+        host.grabToImage(function(res) {
+          var path = root.cacheDir + "/" + String(host.widgetId).replace(/[^A-Za-z0-9._-]/g, "_") + ".png"
+          if (res.saveToFile(path)) root.probeOut[host.widgetId] = "img:" + path
+          if (--root.probePending <= 0) root.writeProbe()
+        })
+      })(h)
+    }
+    if (probePending === 0) writeProbe()
+    else probeSafety.restart()
+  }
+  function writeProbe() {
+    probeSafety.stop()
+    probeFile.setText(JSON.stringify(probeOut))
+    probeOn = false
+    probeIds = []
+  }
+  Timer { id: probeDone; interval: 2800; onTriggered: root.finishProbe() }
+  Timer { id: probeSafety; interval: 2500; onTriggered: root.writeProbe() }
+  FileView { id: probeFile; path: Quickshell.env("HOME") + "/.cache/barctl-icons-live.json"; atomicWrites: true; printErrors: false }
+  QtObject {
+    id: probeBar
+    property string pos: "top"
+    property bool vert: false
+    property int size: Style.bar.sizeHorizontal
+    property var kbHolders: ({})
+    property var tipOwner: null
+    function showTip(host, text) {}
+    function hideTip(host) {}
+  }
+  // The widgets are drawn here, in an invisible click-through window, so they can be photographed.
+  PanelWindow {
+    visible: root.probeOn
+    screen: Quickshell.screens.length ? Quickshell.screens[0] : null
+    anchors { top: true; left: true }
+    implicitWidth: 1000
+    implicitHeight: 200
+    exclusionMode: ExclusionMode.Ignore
+    color: "transparent"
+    mask: Region {}
+    WlrLayershell.layer: WlrLayer.Background
+    WlrLayershell.namespace: "omarchy-extra-bar-probe"
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    Flow {
+      width: 980
+      spacing: 8
+      Repeater {
+        id: probeRep
+        model: root.probeOn ? root.probeIds : []
+        delegate: Hosted {
+          required property var modelData
+          entry: modelData
+          barWin: probeBar
+          svc: root
+        }
+      }
+    }
+  }
+  IpcHandler {
+    target: "s3pp3ku.extra-bars.icons"
+    function probe(ids: string): void { root.startProbe(ids) }
+  }
+
   // Top and bottom bars are created first and the side bars a moment later, because the compositor
   // gives screen edges to windows in the order they appear: side bars then run between the others.
   property bool surfacesOn: true
@@ -729,6 +836,7 @@ Item {
       onCentroidChanged: if (active) host.svc.updateDrag(host.barWin, centroid.scenePosition.x, centroid.scenePosition.y)
     }
 
+    readonly property var widgetItem: loader.item
     readonly property bool needsService: !!info && info.service !== "" && !realService
 
     function targetClickable(t) {
