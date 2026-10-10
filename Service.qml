@@ -175,7 +175,7 @@ Item {
   function applyMainDrop(p) {
     var t = findTarget(p.x, p.y)
     if (!t || t.edge === (shell && shell.bar ? shell.bar.position : "top")) return   // not over an extra bar
-    dropProc.command = [barctlPath, "drop", p.id, t.edge, t.section, t.before]
+    dropProc.command = t.intray ? [barctlPath, "intray", p.id, t.intray] : [barctlPath, "drop", p.id, t.edge, t.section, t.before]
     dropProc.running = false
     dropProc.running = true
   }
@@ -224,7 +224,7 @@ Item {
       var win = barItems[edges[i]]
       if (!r || !win || !inRect(r, gx, gy, slack)) continue
       var d = win.dropAt(gx - r.x, gy - r.y, dragSource ? dragSource.id : "")
-      if (d) return { edge: edges[i], section: d.section, before: d.before,
+      if (d) return { edge: edges[i], section: d.section, before: d.before, intray: d.intray || "",
                       rect: { x: r.x + d.ind.x, y: r.y + d.ind.y, w: d.ind.w, h: d.ind.h } }
     }
     var m = layerRects["omarchy-bar"]
@@ -250,7 +250,8 @@ Item {
     lastScene = null
     if (!tgt || !src) return
     if (src.id.indexOf("tray:") === 0 && tgt.edge === (shell && shell.bar ? shell.bar.position : "top")) return   // the main bar uses the Tray plugin
-    dropProc.command = [barctlPath, "drop", src.id, tgt.edge, tgt.section, tgt.before]
+    dropProc.command = tgt.intray ? [barctlPath, "intray", src.id, tgt.intray]
+                                  : [barctlPath, "drop", src.id, tgt.edge, tgt.section, tgt.before]
     dropProc.running = false
     dropProc.running = true
   }
@@ -456,6 +457,17 @@ Item {
       if (!chosen) chosen = a < len / 3 ? secs[0] : (a < 2 * len / 3 ? secs[1] : secs[2])
       var slots = chosen.item.slotRects(excludeId)
       var origin = chosen.item.mapToItem(win.contentItem, 0, 0)
+      // over a tray (its chevron or its opened drawer): the widget goes INTO it (trays cannot hold trays)
+      if (String(excludeId).indexOf("tray:") !== 0) {
+        var local = chosen.item.mapFromItem(win.contentItem, lx, ly)
+        for (var t = 0; t < slots.length; t++) {
+          var tr = slots[t]
+          if (!tr.tray) continue
+          if (local.x >= tr.x - 4 && local.x <= tr.x + tr.w + 4 && local.y >= tr.y - 4 && local.y <= tr.y + tr.h + 4)
+            return { section: chosen.name, before: "", intray: tr.id,
+                     ind: { x: origin.x + tr.x - 2, y: origin.y + tr.y - 2, w: tr.w + 4, h: tr.h + 4 } }
+        }
+      }
       var ox = vert ? origin.y : origin.x
       var before = "", mark = 0, found = false
       for (var j = 0; j < slots.length; j++) {
@@ -540,7 +552,7 @@ Item {
         var id = section.svc.entryId(it.modelData)
         if (id === excludeId) continue
         var p = it.mapToItem(section, 0, 0)
-        out.push({ id: id, x: p.x, y: p.y, w: it.width, h: it.height })
+        out.push({ id: id, x: p.x, y: p.y, w: it.width, h: it.height, tray: id.indexOf("tray:") === 0 })
       }
       return out
     }

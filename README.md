@@ -74,6 +74,7 @@ Press and drag any widget on an extra bar to move it. A marker shows where it wi
 - **Between sections and bars**: drop it on any section of any extra bar, before the widget under the pointer, or at the end of a section. Dropping on an empty section puts it there.
 - **Onto the main bar**: drop it on the main bar and it goes to the end of the section under the pointer (left, center or right third).
 - **Side bars** read top to bottom: the three sections are top, middle and bottom.
+- **Into a tray**: drop a widget on a tray (its chevron or its open drawer) and it goes inside; a box marks the tray while you hover. Works on all four bars.
 - **Whole trays**: grab a tray's chevron and drag: the tray and everything in it moves to the drop spot (trays cannot go on the main bar, which uses the Tray plugin).
 - A widget can opt out of dragging with `readonly property bool draggable: false` (BarTerm does, because dragging in its input would fight with selecting text).
 - Moves are applied with [Bar Manager](https://github.com/s3pp3ku/omarchy-bar-manager)'s `barctl drop`, so Bar Manager must be installed for drag and drop to work. The widget's own click now fires on release rather than on press, so a click and a drag can be told apart.
