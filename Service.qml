@@ -368,6 +368,52 @@ Item {
 
     Component.onCompleted: if (svc) svc.barItems[pos] = win
 
+    // ---- tooltip: a small banner beside the hovered widget, on the side facing the screen
+    property var tipOwner: null
+    function showTip(host, text) {
+      if (svc && svc.dragLive) return
+      var p = host.mapToItem(win.contentItem, 0, 0)
+      tipOwner = host
+      tip.text = text
+      tip.anchor.rect = Qt.rect(p.x, p.y, host.width, host.height)
+      tip.visible = true
+    }
+    function hideTip(host) {
+      if (host && tipOwner !== host) return
+      tipOwner = null
+      tip.visible = false
+    }
+    PopupWindow {
+      id: tip
+      property string text: ""
+      anchor.window: win
+      anchor.edges: win.pos === "bottom" ? Edges.Top : (win.pos === "top" ? Edges.Bottom : (win.pos === "left" ? Edges.Right : Edges.Left))
+      anchor.gravity: win.pos === "bottom" ? Edges.Top : (win.pos === "top" ? Edges.Bottom : (win.pos === "left" ? Edges.Right : Edges.Left))
+      anchor.adjustment: PopupAdjustment.All
+      visible: false
+      color: "transparent"
+      implicitWidth: tipCard.implicitWidth
+      implicitHeight: tipCard.implicitHeight
+      Rectangle {
+        id: tipCard
+        implicitWidth: tipText.implicitWidth + 20
+        implicitHeight: tipText.implicitHeight + 12
+        color: Color.popups.background
+        border.color: Color.popups.border
+        border.width: 1
+        radius: 4
+        Text {
+          id: tipText
+          anchors.centerIn: parent
+          text: tip.text
+          color: Color.popups.text
+          font.family: Style.font.family
+          font.pixelSize: 12
+          horizontalAlignment: Text.AlignLeft
+        }
+      }
+    }
+
     // Where a widget dropped at (lx, ly) in this bar would land: the section, the widget it goes
     // before, and a marker rectangle (all in this window's coordinates).
     function dropAt(lx, ly, excludeId) {
@@ -611,6 +657,20 @@ Item {
     // A widget can opt out of being dragged (e.g. one with a text field) with `readonly property bool draggable: false`.
     readonly property bool noDrag: !!loader.item && loader.item.draggable === false
 
+    // Widgets that do not ask for a tooltip still get one: their name and plugin id.
+    Timer {
+      id: tipDelay
+      interval: 700
+      onTriggered: if (hoverTip.hovered && !host.barWin.tipOwner) {
+        var name = host.info && host.info.name ? host.info.name : host.widgetId
+        host.barWin.showTip(host, name + "\n" + host.widgetId)
+      }
+    }
+    HoverHandler {
+      id: hoverTip
+      onHoveredChanged: { if (hovered) tipDelay.restart(); else { tipDelay.stop(); host.barWin.hideTip(host) } }
+    }
+
     DragHandler {
       id: dragger
       enabled: !host.noDrag
@@ -668,6 +728,9 @@ Item {
       _unregisterClickTarget: function (target) {
         api.clickTargets = api.clickTargets.filter(function (t) { return t !== target })
       }
+      // Widgets ask for their tooltip here (WidgetButton does on hover); we add the plugin id under it.
+      _showTooltip: function (target, text) { host.barWin.showTip(host, (text ? text + "\n" : "") + host.widgetId) }
+      _hideTooltip: function (target) { host.barWin.hideTip(host) }
       _run: function (command) { Quickshell.execDetached(["bash", "-c", command]) }
       _requestPopout: function (owner) { api.activePopout = owner }
       _releasePopout: function (owner) { if (api.activePopout === owner) api.activePopout = null }

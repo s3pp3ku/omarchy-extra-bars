@@ -81,3 +81,7 @@ Press and drag any widget on an extra bar to move it. A marker shows where it wi
 ## Corners
 
 Top and bottom bars take priority: they are created first, so side bars run between them and shrink to fit instead of overlapping the corners.
+
+## Tooltips
+
+Hovering a widget on an extra bar shows a small banner on the side facing the screen: the widget's own tooltip text (if it has one) with its plugin id underneath. Widgets without a tooltip show their name and plugin id.
